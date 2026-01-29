@@ -1,0 +1,12 @@
+# Ignore everything
+*
+
+# Include necessary files
+!dist/
+!prisma/
+!package.json
+!pnpm-lock.yaml
+
+# Exclude from dist
+dist/**/*.map
+dist/**/*.test.js

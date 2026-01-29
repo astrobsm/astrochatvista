@@ -1,0 +1,1015 @@
+// ============================================================================
+// CHATVISTA - Prisma Database Schema
+// Enterprise Video Conferencing Platform
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  passwordHash        String?
+  firstName           String
+  lastName            String
+  displayName         String
+  avatarUrl           String?
+  role                UserRole  @default(PARTICIPANT)
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  departmentId        String?
+  department          Department? @relation(fields: [departmentId], references: [id])
+  timezone            String    @default("UTC")
+  locale              String    @default("en-US")
+  preferences         Json      @default("{}")
+  biometricEnabled    Boolean   @default(false)
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?
+  emailVerified       Boolean   @default(false)
+  emailVerifiedAt     DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  status              UserStatus @default(ACTIVE)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  hostedMeetings      Meeting[] @relation("MeetingHost")
+  participations      Participant[]
+  recordings          Recording[]
+  exportedDocuments   ExportedDocument[]
+  actionItemsAssigned ActionItem[] @relation("ActionItemAssignee")
+  actionItemsReported ActionItem[] @relation("ActionItemReporter")
+  approvalRecords     ApprovalRecord[]
+  auditLogs           AuditLog[]
+  refreshTokens       RefreshToken[]
+  notifications       Notification[]
+  whiteboardElements  WhiteboardElement[]
+  chatMessages        ChatMessage[]
+
+  @@index([email])
+  @@index([organizationId])
+  @@index([departmentId])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  DEPT_ADMIN
+  HOST
+  CO_HOST
+  PARTICIPANT
+  OBSERVER
+  AUDITOR
+  GUEST
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+  DELETED
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  deviceInfo  Json?
+  ipAddress   String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  revokedAt   DateTime?
+
+  @@index([userId])
+  @@index([token])
+}
+
+// ============================================================================
+// ORGANIZATION & HIERARCHY
+// ============================================================================
+
+model Organization {
+  id                  String    @id @default(uuid())
+  name                String
+  domain              String    @unique
+  logoUrl             String?
+  brandingConfig      Json      @default("{}")
+  subscriptionTier    SubscriptionTier @default(FREE)
+  complianceSettings  Json      @default("{}")
+  ssoConfig           Json?
+  dataResidency       DataResidency @default(US)
+  maxUsers            Int       @default(100)
+  maxMeetingDuration  Int       @default(60) // minutes
+  maxParticipants     Int       @default(100)
+  storageQuotaGb      Int       @default(10)
+  storageUsedBytes    BigInt    @default(0)
+  status              OrgStatus @default(ACTIVE)
+  trialEndsAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  users               User[]
+  departments         Department[]
+  meetings            Meeting[]
+  integrations        Integration[]
+  webhooks            Webhook[]
+  customVocabularies  CustomVocabulary[]
+  exportTemplates     ExportTemplate[]
+  retentionPolicies   RetentionPolicy[]
+
+  @@index([domain])
+}
+
+enum SubscriptionTier {
+  FREE
+  PROFESSIONAL
+  BUSINESS
+  ENTERPRISE
+  HEALTHCARE
+  LEGAL
+  GOVERNMENT
+}
+
+enum DataResidency {
+  US
+  EU
+  UK
+  APAC
+  CANADA
+  AUSTRALIA
+  GERMANY
+  JAPAN
+}
+
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  TRIAL
+}
+
+model Department {
+  id                  String    @id @default(uuid())
+  name                String
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  parentDepartmentId  String?
+  parentDepartment    Department? @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id])
+  childDepartments    Department[] @relation("DepartmentHierarchy")
+  managerId           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  users               User[]
+
+  @@index([organizationId])
+}
+
+// ============================================================================
+// MEETINGS
+// ============================================================================
+
+model Meeting {
+  id                  String    @id @default(uuid())
+  title               String
+  description         String?
+  type                MeetingType @default(SCHEDULED)
+  status              MeetingStatus @default(SCHEDULED)
+  hostId              String
+  host                User      @relation("MeetingHost", fields: [hostId], references: [id])
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  scheduledStartTime  DateTime?
+  scheduledEndTime    DateTime?
+  actualStartTime     DateTime?
+  actualEndTime       DateTime?
+  timezone            String    @default("UTC")
+  recurrence          Json?
+  accessCode          String?
+  accessCodeHash      String?
+  waitingRoomEnabled  Boolean   @default(true)
+  e2eEncrypted        Boolean   @default(true)
+  recordingEnabled    Boolean   @default(true)
+  transcriptionEnabled Boolean  @default(true)
+  translationEnabled  Boolean   @default(false)
+  maxParticipants     Int       @default(100)
+  settings            Json      @default("{}")
+  agenda              Json?
+  roomId              String    @unique @default(uuid())
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  participants        Participant[]
+  recordings          Recording[]
+  transcripts         Transcript[]
+  meetingMinutes      MeetingMinutes[]
+  whiteboards         Whiteboard[]
+  chatMessages        ChatMessage[]
+  polls               Poll[]
+  breakoutRooms       BreakoutRoom[]
+
+  @@index([hostId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([scheduledStartTime])
+  @@index([roomId])
+}
+
+enum MeetingType {
+  INSTANT
+  SCHEDULED
+  RECURRING
+  WEBINAR
+  BREAKOUT
+  TRAINING
+  INTERVIEW
+  BOARD_MEETING
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  WAITING_ROOM
+  IN_PROGRESS
+  ON_HOLD
+  ENDED
+  CANCELLED
+}
+
+model Participant {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId              String?
+  user                User?     @relation(fields: [userId], references: [id])
+  displayName         String
+  email               String?
+  role                ParticipantRole @default(PARTICIPANT)
+  status              ParticipantStatus @default(WAITING)
+  joinedAt            DateTime?
+  leftAt              DateTime?
+  audioEnabled        Boolean   @default(false)
+  videoEnabled        Boolean   @default(false)
+  screenShareActive   Boolean   @default(false)
+  handRaised          Boolean   @default(false)
+  connectionQuality   ConnectionQuality @default(UNKNOWN)
+  deviceInfo          Json?
+  networkStats        Json?
+  totalSpeakingTime   Int       @default(0) // seconds
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  speakerProfile      SpeakerProfile?
+
+  @@index([meetingId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum ParticipantRole {
+  HOST
+  CO_HOST
+  PANELIST
+  PARTICIPANT
+  INTERPRETER
+  OBSERVER
+  ATTENDEE
+}
+
+enum ParticipantStatus {
+  WAITING
+  JOINED
+  ON_HOLD
+  LEFT
+  REMOVED
+  DISCONNECTED
+}
+
+enum ConnectionQuality {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+  CRITICAL
+  UNKNOWN
+}
+
+model BreakoutRoom {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name                String
+  participantIds      String[]
+  hostId              String?
+  status              BreakoutRoomStatus @default(PENDING)
+  startedAt           DateTime?
+  endedAt             DateTime?
+  duration            Int?      // minutes
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([meetingId])
+}
+
+enum BreakoutRoomStatus {
+  PENDING
+  ACTIVE
+  CLOSED
+}
+
+// ============================================================================
+// TRANSCRIPTION & SPEECH-TO-TEXT
+// ============================================================================
+
+model Transcript {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  language            String    @default("en-US")
+  status              TranscriptStatus @default(RECORDING)
+  wordCount           Int       @default(0)
+  duration            Int       @default(0) // seconds
+  accuracy            Float?
+  processingEngine    String?   // whisper, azure, google
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  finalizedAt         DateTime?
+
+  // Relations
+  segments            TranscriptSegment[]
+  speakers            SpeakerProfile[]
+
+  @@index([meetingId])
+  @@index([status])
+}
+
+enum TranscriptStatus {
+  RECORDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EDITING
+  FINALIZED
+}
+
+model TranscriptSegment {
+  id                  String    @id @default(uuid())
+  transcriptId        String
+  transcript          Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  speakerId           String
+  speaker             SpeakerProfile @relation(fields: [speakerId], references: [id])
+  text                String
+  startTime           Int       // milliseconds
+  endTime             Int       // milliseconds
+  confidence          Float     @default(0)
+  language            String    @default("en-US")
+  translation         Json?
+  words               Json      @default("[]")
+  isEdited            Boolean   @default(false)
+  editedBy            String?
+  editedAt            DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([transcriptId])
+  @@index([speakerId])
+  @@index([startTime])
+}
+
+model SpeakerProfile {
+  id                  String    @id @default(uuid())
+  transcriptId        String
+  transcript          Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  participantId       String?   @unique
+  participant         Participant? @relation(fields: [participantId], references: [id])
+  name                String
+  color               String    @default("#6366f1")
+  totalSpeakingTime   Int       @default(0) // seconds
+  segmentCount        Int       @default(0)
+  averageConfidence   Float     @default(0)
+  voiceSignature      String?   // For speaker re-identification
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  segments            TranscriptSegment[]
+
+  @@index([transcriptId])
+}
+
+model CustomVocabulary {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  name                String
+  domain              VocabularyDomain @default(GENERAL)
+  terms               Json      @default("[]")
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([organizationId])
+}
+
+enum VocabularyDomain {
+  GENERAL
+  MEDICAL
+  LEGAL
+  TECHNICAL
+  FINANCIAL
+  SCIENTIFIC
+}
+
+// ============================================================================
+// MEETING MINUTES (MoM)
+// ============================================================================
+
+model MeetingMinutes {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  version             Int       @default(1)
+  status              MinutesStatus @default(DRAFT)
+  template            MinutesTemplate @default(CORPORATE)
+  header              Json
+  attendance          Json
+  agendaComparison    Json?
+  discussions         Json      @default("[]")
+  decisions           Json      @default("[]")
+  followUp            Json?
+  appendices          Json      @default("[]")
+  metadata            Json      @default("{}")
+  aiConfidenceScore   Float?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  publishedAt         DateTime?
+
+  // Relations
+  actionItems         ActionItem[]
+  approvalRecords     ApprovalRecord[]
+  exportedDocuments   ExportedDocument[]
+  versionHistory      MinutesVersion[]
+
+  @@index([meetingId])
+  @@index([status])
+}
+
+enum MinutesStatus {
+  DRAFT
+  PENDING_REVIEW
+  UNDER_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum MinutesTemplate {
+  CORPORATE
+  ACADEMIC
+  MEDICAL
+  LEGAL
+  BOARD
+  PROJECT
+  STANDUP
+  INTERVIEW
+  CUSTOM
+}
+
+model MinutesVersion {
+  id                  String    @id @default(uuid())
+  minutesId           String
+  minutes             MeetingMinutes @relation(fields: [minutesId], references: [id], onDelete: Cascade)
+  version             Int
+  content             Json
+  changedBy           String
+  changeDescription   String
+  changeType          ChangeType
+  createdAt           DateTime  @default(now())
+
+  @@index([minutesId])
+}
+
+enum ChangeType {
+  CREATED
+  EDITED
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+model ActionItem {
+  id                  String    @id @default(uuid())
+  minutesId           String
+  minutes             MeetingMinutes @relation(fields: [minutesId], references: [id], onDelete: Cascade)
+  number              Int
+  title               String
+  description         String
+  assigneeId          String
+  assignee            User      @relation("ActionItemAssignee", fields: [assigneeId], references: [id])
+  coAssignees         String[]  @default([])
+  reporterId          String
+  reporter            User      @relation("ActionItemReporter", fields: [reporterId], references: [id])
+  priority            Priority  @default(MEDIUM)
+  status              ActionItemStatus @default(PENDING)
+  dueDate             DateTime?
+  estimatedEffort     Int?      // hours
+  category            String?
+  dependencies        String[]  @default([])
+  blockedBy           String[]  @default([])
+  relatedDecisionId   String?
+  discussionContext   String?
+  completedAt         DateTime?
+  completionNotes     String?
+  externalTaskId      String?
+  externalTaskUrl     String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([minutesId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+enum Priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ActionItemStatus {
+  PENDING
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+  DEFERRED
+}
+
+model ApprovalRecord {
+  id                  String    @id @default(uuid())
+  minutesId           String
+  minutes             MeetingMinutes @relation(fields: [minutesId], references: [id], onDelete: Cascade)
+  approverId          String
+  approver            User      @relation(fields: [approverId], references: [id])
+  status              ApprovalStatus @default(PENDING)
+  comments            String?
+  signature           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([minutesId])
+  @@index([approverId])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+// ============================================================================
+// DOCUMENT EXPORT
+// ============================================================================
+
+model ExportTemplate {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  name                String
+  type                MinutesTemplate
+  headerHtml          String?
+  footerHtml          String?
+  stylesCss           String?
+  pageSize            PageSize  @default(A4)
+  orientation         PageOrientation @default(PORTRAIT)
+  margins             Json      @default("{\"top\": 72, \"right\": 72, \"bottom\": 72, \"left\": 72}")
+  isDefault           Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([organizationId])
+}
+
+enum PageSize {
+  A4
+  LETTER
+  LEGAL
+}
+
+enum PageOrientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+model ExportedDocument {
+  id                  String    @id @default(uuid())
+  minutesId           String
+  minutes             MeetingMinutes @relation(fields: [minutesId], references: [id], onDelete: Cascade)
+  format              ExportFormat
+  fileName            String
+  fileSize            Int
+  fileUrl             String
+  checksum            String
+  encrypted           Boolean   @default(false)
+  signed              Boolean   @default(false)
+  expiresAt           DateTime?
+  downloadCount       Int       @default(0)
+  createdById         String
+  createdBy           User      @relation(fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+
+  @@index([minutesId])
+  @@index([createdById])
+}
+
+enum ExportFormat {
+  PDF
+  DOCX
+  HTML
+  TXT
+  MARKDOWN
+  JSON
+}
+
+// ============================================================================
+// RECORDINGS
+// ============================================================================
+
+model Recording {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  type                RecordingType @default(CLOUD)
+  status              RecordingStatus @default(RECORDING)
+  startTime           DateTime  @default(now())
+  endTime             DateTime?
+  duration            Int?      // seconds
+  fileSize            BigInt?
+  storageLocation     StorageLocation @default(PRIMARY)
+  storageUrl          String?
+  thumbnailUrl        String?
+  tracks              Json      @default("[]")
+  processingInfo      Json      @default("{}")
+  accessControl       Json      @default("{}")
+  retentionPolicyId   String?
+  retentionPolicy     RetentionPolicy? @relation(fields: [retentionPolicyId], references: [id])
+  highlights          Json      @default("[]")
+  chapters            Json      @default("[]")
+  createdById         String
+  createdBy           User      @relation(fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([meetingId])
+  @@index([status])
+  @@index([createdById])
+}
+
+enum RecordingType {
+  CLOUD
+  LOCAL
+  COMPOSITE
+  INDIVIDUAL
+}
+
+enum RecordingStatus {
+  RECORDING
+  PAUSED
+  STOPPED
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum StorageLocation {
+  PRIMARY
+  SECONDARY
+  ARCHIVE
+  LOCAL
+}
+
+model RetentionPolicy {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  name                String
+  retentionDays       Int       @default(365)
+  autoDelete          Boolean   @default(false)
+  archiveAfterDays    Int?
+  legalHold           Boolean   @default(false)
+  complianceRule      String?
+  isDefault           Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  recordings          Recording[]
+
+  @@index([organizationId])
+}
+
+// ============================================================================
+// COLLABORATION
+// ============================================================================
+
+model Whiteboard {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name                String    @default("Whiteboard")
+  createdById         String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  elements            WhiteboardElement[]
+
+  @@index([meetingId])
+}
+
+model WhiteboardElement {
+  id                  String    @id @default(uuid())
+  whiteboardId        String
+  whiteboard          Whiteboard @relation(fields: [whiteboardId], references: [id], onDelete: Cascade)
+  type                WhiteboardElementType
+  x                   Float
+  y                   Float
+  width               Float?
+  height              Float?
+  rotation            Float     @default(0)
+  content             Json
+  style               Json
+  createdById         String
+  createdBy           User      @relation(fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([whiteboardId])
+}
+
+enum WhiteboardElementType {
+  FREEHAND
+  LINE
+  ARROW
+  RECTANGLE
+  ELLIPSE
+  TEXT
+  STICKY_NOTE
+  IMAGE
+  CONNECTOR
+  SHAPE
+}
+
+model ChatMessage {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  senderId            String
+  sender              User      @relation(fields: [senderId], references: [id])
+  recipientId         String?   // null for public messages
+  type                ChatMessageType @default(TEXT)
+  content             String
+  attachments         Json      @default("[]")
+  reactions           Json      @default("[]")
+  replyToId           String?
+  isEdited            Boolean   @default(false)
+  isDeleted           Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([meetingId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+enum ChatMessageType {
+  TEXT
+  FILE
+  POLL
+  SYSTEM
+  REACTION
+}
+
+model Poll {
+  id                  String    @id @default(uuid())
+  meetingId           String
+  meeting             Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  question            String
+  type                PollType  @default(SINGLE_CHOICE)
+  options             Json
+  status              PollStatus @default(DRAFT)
+  anonymous           Boolean   @default(false)
+  multipleChoice      Boolean   @default(false)
+  votes               Json      @default("[]")
+  results             Json?
+  createdById         String
+  createdAt           DateTime  @default(now())
+  closedAt            DateTime?
+
+  @@index([meetingId])
+}
+
+enum PollType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  RATING
+  OPEN_ENDED
+}
+
+enum PollStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+// ============================================================================
+// INTEGRATIONS & WEBHOOKS
+// ============================================================================
+
+model Integration {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  type                IntegrationType
+  name                String
+  status              IntegrationStatus @default(PENDING)
+  config              Json      @default("{}")
+  credentials         Json?     // Encrypted
+  scopes              String[]  @default([])
+  lastSyncAt          DateTime?
+  createdById         String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([type])
+}
+
+enum IntegrationType {
+  CALENDAR
+  PROJECT_MANAGEMENT
+  CRM
+  CLOUD_STORAGE
+  COMMUNICATION
+  SSO
+  CUSTOM
+}
+
+enum IntegrationStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+  PENDING
+}
+
+model Webhook {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  url                 String
+  events              String[]
+  secret              String
+  status              WebhookStatus @default(ACTIVE)
+  headers             Json      @default("{}")
+  retryPolicy         Json      @default("{\"maxRetries\": 3, \"initialDelayMs\": 1000, \"maxDelayMs\": 30000, \"backoffMultiplier\": 2}")
+  lastTriggeredAt     DateTime?
+  failureCount        Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+enum WebhookStatus {
+  ACTIVE
+  INACTIVE
+  FAILED
+}
+
+// ============================================================================
+// AUDIT & COMPLIANCE
+// ============================================================================
+
+model AuditLog {
+  id                  String    @id @default(uuid())
+  timestamp           DateTime  @default(now())
+  actorId             String
+  actor               User      @relation(fields: [actorId], references: [id])
+  actorRole           UserRole
+  actorIp             String?
+  actorDevice         String?
+  action              AuditAction
+  resourceType        AuditResourceType
+  resourceId          String
+  resourceName        String?
+  details             Json      @default("{}")
+  result              AuditResult
+  organizationId      String
+  sessionId           String?
+
+  @@index([actorId])
+  @@index([timestamp])
+  @@index([resourceType, resourceId])
+  @@index([organizationId])
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  JOIN
+  LEAVE
+  START_RECORDING
+  STOP_RECORDING
+  SHARE_SCREEN
+  EXPORT
+  DOWNLOAD
+  APPROVE
+  REJECT
+  INVITE
+  REMOVE
+  MUTE
+  UNMUTE
+  DISABLE_VIDEO
+  ENABLE_VIDEO
+  ADMIT
+  DENY
+}
+
+enum AuditResourceType {
+  USER
+  MEETING
+  RECORDING
+  TRANSCRIPT
+  MINUTES
+  DOCUMENT
+  ORGANIZATION
+  SETTINGS
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+  PARTIAL
+  DENIED
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id                  String    @id @default(uuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                NotificationType
+  title               String
+  body                String
+  data                Json      @default("{}")
+  read                Boolean   @default(false)
+  actionUrl           String?
+  createdAt           DateTime  @default(now())
+  expiresAt           DateTime?
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  MEETING_REMINDER
+  MEETING_STARTED
+  MEETING_ENDED
+  RECORDING_READY
+  TRANSCRIPT_READY
+  MINUTES_READY
+  ACTION_ITEM_ASSIGNED
+  ACTION_ITEM_DUE
+  APPROVAL_REQUESTED
+  SYSTEM_UPDATE
+}

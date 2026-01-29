@@ -1,0 +1,165 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatvista-postgres
+    environment:
+      POSTGRES_USER: chatvista
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-chatvista_secure_2024}
+      POSTGRES_DB: chatvista
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatvista"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatvista-network
+
+  # Redis for caching, sessions, and real-time pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: chatvista-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-chatvista_redis_2024}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatvista-network
+
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: chatvista-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-chatvista}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-chatvista_minio_2024}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - chatvista-network
+
+  # Coturn TURN/STUN server for WebRTC NAT traversal
+  coturn:
+    image: coturn/coturn:latest
+    container_name: chatvista-coturn
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "5349:5349/udp"
+      - "49152-49200:49152-49200/udp"
+    volumes:
+      - ./config/turnserver.conf:/etc/coturn/turnserver.conf
+    networks:
+      - chatvista-network
+
+  # MediaSoup SFU for scalable video routing
+  mediasoup:
+    build:
+      context: ./apps/media-server
+      dockerfile: Dockerfile
+    container_name: chatvista-mediasoup
+    ports:
+      - "3001:3001"
+      - "40000-40100:40000-40100/udp"
+    environment:
+      - MEDIASOUP_LISTEN_IP=0.0.0.0
+      - MEDIASOUP_ANNOUNCED_IP=${PUBLIC_IP:-127.0.0.1}
+    depends_on:
+      - redis
+    networks:
+      - chatvista-network
+
+  # Elasticsearch for transcript search and analytics
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: chatvista-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - chatvista-network
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: chatvista-backend
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://chatvista:${DB_PASSWORD:-chatvista_secure_2024}@postgres:5432/chatvista
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-chatvista_redis_2024}@redis:6379
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - chatvista-network
+
+  # Frontend Next.js Application
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: chatvista-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:4000
+      - NEXT_PUBLIC_MEDIA_SERVER_URL=http://localhost:3001
+    depends_on:
+      - backend
+    networks:
+      - chatvista-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  elasticsearch_data:
+
+networks:
+  chatvista-network:
+    driver: bridge
