@@ -1,0 +1,96 @@
+# DigitalOcean App Platform Specification
+# Deploy with: doctl apps create --spec .do/app.yaml
+
+name: chatvista-backend
+
+# Specify the region
+region: nyc
+
+# Services
+services:
+  - name: api
+    github:
+      repo: astrobsm/astrochatvista
+      branch: main
+      deploy_on_push: true
+    
+    # Use Dockerfile for build
+    dockerfile_path: apps/backend/Dockerfile
+    
+    # Environment settings
+    source_dir: /
+    
+    # HTTP settings
+    http_port: 4000
+    
+    # Instance settings
+    instance_count: 1
+    instance_size_slug: basic-xs  # $5/month - upgrade as needed
+    
+    # Health check
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    
+    # Routes
+    routes:
+      - path: /
+    
+    # Environment variables (set these in DO dashboard)
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: REDIS_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: FRONTEND_URL
+        scope: RUN_TIME
+        value: "${FRONTEND_URL}"
+      - key: CORS_ORIGINS
+        scope: RUN_TIME
+        value: "${CORS_ORIGINS}"
+      - key: DO_SPACES_ENDPOINT
+        scope: RUN_TIME
+        value: "${DO_SPACES_ENDPOINT}"
+      - key: DO_SPACES_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_BUCKET
+        scope: RUN_TIME
+        value: "${DO_SPACES_BUCKET}"
+
+# Database (managed PostgreSQL)
+databases:
+  - name: chatvista-db
+    engine: PG
+    version: "16"
+    size: db-s-1vcpu-1gb  # $15/month - upgrade as needed
+    num_nodes: 1
+
+# Alert policies
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+  - rule: CPU_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES
+  - rule: MEM_UTILIZATION
+    value: 80
+    operator: GREATER_THAN
+    window: FIVE_MINUTES

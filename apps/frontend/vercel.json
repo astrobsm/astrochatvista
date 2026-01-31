@@ -29,7 +29,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=()"
+          "value": "camera=(self), microphone=(self), geolocation=()"
         }
       ]
     },
@@ -55,7 +55,7 @@
   "rewrites": [
     {
       "source": "/api/v1/:path*",
-      "destination": "https://api.chatvista.app/api/v1/:path*"
+      "destination": "https://chatvista-backend.ondigitalocean.app/api/v1/:path*"
     }
   ],
   "redirects": [
