@@ -14,6 +14,7 @@ declare module 'next-auth' {
       name: string;
       image?: string;
       role: string;
+      createdAt?: string;
     };
     accessToken: string;
     refreshToken: string;

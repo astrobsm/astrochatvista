@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import Image from 'next/image';
 import { Video, RefreshCw, Home, AlertTriangle } from 'lucide-react';
 
 export default function GlobalError({
@@ -25,13 +26,11 @@ export default function GlobalError({
       <div className="max-w-md w-full text-center">
         {/* Logo */}
         <a href="/" className="inline-flex items-center gap-2 mb-8">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-            <Video className="w-6 h-6 text-white" />
-          </div>
+          <Image src="/logo.png" alt="ChatVista" width={40} height={40} className="w-10 h-10 rounded-lg" />
           <span className="text-2xl font-bold text-white">ChatVista</span>
         </a>
 
-        {/* Error Icon */}
+        {/* Error Icon */}}
         <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-6">
           <AlertTriangle className="w-10 h-10 text-red-400" />
         </div>

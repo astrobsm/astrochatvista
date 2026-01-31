@@ -3,6 +3,7 @@
 // Cloud recording with transcoding and storage
 // ============================================================================
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { safePublish } from '../lib/redis';
 import { config } from '../config';
@@ -95,7 +96,7 @@ export class RecordingService {
 
   async startRecording(
     meetingId: string,
-    startedBy: string,
+    createdById: string,
     configOverrides: Partial<RecordingConfig> = {}
   ): Promise<{ recordingId: string }> {
     // Check if already recording
@@ -124,12 +125,15 @@ export class RecordingService {
     const recording = await prisma.recording.create({
       data: {
         meetingId,
-        startedBy,
+        createdById,
         status: 'RECORDING',
-        format: recordingConfig.format,
-        quality: recordingConfig.quality,
-        layout: recordingConfig.layout,
-        settings: recordingConfig,
+        type: 'CLOUD',
+        processingInfo: {
+          format: recordingConfig.format,
+          quality: recordingConfig.quality,
+          layout: recordingConfig.layout,
+          config: recordingConfig as unknown as Prisma.JsonObject,
+        } as Prisma.InputJsonValue,
       },
     });
 
@@ -157,7 +161,7 @@ export class RecordingService {
       type: 'recording.started',
       meetingId,
       recordingId: recording.id,
-      startedBy,
+      createdById,
       timestamp: new Date().toISOString(),
     }));
 
@@ -259,7 +263,7 @@ export class RecordingService {
       data: {
         status: 'PROCESSING',
         duration,
-        endedAt: new Date(),
+        endTime: new Date(),
       },
     });
 
@@ -345,12 +349,14 @@ export class RecordingService {
       await prisma.recording.update({
         where: { id: session.recordingId },
         data: {
-          status: 'AVAILABLE',
-          url: primaryOutput.url,
+          status: 'READY',
+          storageUrl: primaryOutput.url,
           fileSize: primaryOutput.fileSize,
           thumbnailUrl: thumbnailKey,
-          outputs,
-          processedAt: new Date(),
+          processingInfo: { 
+            outputs: outputs as unknown as Prisma.JsonArray, 
+            processedAt: new Date().toISOString() 
+          } as Prisma.InputJsonValue,
         },
       });
 
@@ -370,7 +376,7 @@ export class RecordingService {
         where: { id: session.recordingId },
         data: {
           status: 'FAILED',
-          error: (error as Error).message,
+          processingInfo: { error: (error as Error).message },
         },
       });
 
@@ -454,7 +460,7 @@ export class RecordingService {
       where: { id: recordingId },
       include: {
         meeting: true,
-        starter: true,
+        createdBy: true,
       },
     });
 
@@ -512,7 +518,7 @@ export class RecordingService {
   ): Promise<{ url: string; expiresAt: Date }> {
     const recording = await this.getRecording(recordingId);
 
-    if (recording.status !== 'AVAILABLE') {
+    if (recording.status !== 'READY') {
       throw new AppError('Recording not yet available', 400);
     }
 
@@ -560,11 +566,19 @@ export class RecordingService {
     organizationId: string,
     retentionDays: number
   ): Promise<void> {
-    // Update organization settings
+    // Update organization compliance settings
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { complianceSettings: true },
+    });
+    
+    const currentSettings = (org?.complianceSettings as Record<string, any>) || {};
+    
     await prisma.organization.update({
       where: { id: organizationId },
       data: {
-        settings: {
+        complianceSettings: {
+          ...currentSettings,
           recordingRetentionDays: retentionDays,
         },
       },
@@ -574,13 +588,13 @@ export class RecordingService {
   async cleanupExpiredRecordings(): Promise<number> {
     // Get organizations with retention policies
     const organizations = await prisma.organization.findMany({
-      select: { id: true, settings: true },
+      select: { id: true, complianceSettings: true },
     });
 
     let deletedCount = 0;
 
     for (const org of organizations) {
-      const settings = org.settings as any;
+      const settings = org.complianceSettings as any;
       const retentionDays = settings?.recordingRetentionDays || 90;
       const cutoffDate = new Date(
         Date.now() - retentionDays * 24 * 60 * 60 * 1000

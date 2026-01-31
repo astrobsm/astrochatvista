@@ -4,52 +4,20 @@
 // ============================================================================
 
 import { prisma } from '../lib/prisma';
+import { Prisma, UserRole, AuditAction, AuditResourceType, AuditResult } from '@prisma/client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { Redis } from 'ioredis';
 
 // ============================================================================
-// Types
+// Types - Re-export Prisma types for external use
 // ============================================================================
 
-export type AuditAction =
-  | 'CREATE'
-  | 'READ'
-  | 'UPDATE'
-  | 'DELETE'
-  | 'LOGIN'
-  | 'LOGOUT'
-  | 'EXPORT'
-  | 'SHARE'
-  | 'REVOKE'
-  | 'INVITE'
-  | 'JOIN'
-  | 'LEAVE'
-  | 'START'
-  | 'END'
-  | 'UPLOAD'
-  | 'DOWNLOAD'
-  | 'CONFIGURE';
-
-export type AuditResourceType =
-  | 'USER'
-  | 'ORGANIZATION'
-  | 'TEAM'
-  | 'MEETING'
-  | 'RECORDING'
-  | 'TRANSCRIPT'
-  | 'MINUTES'
-  | 'DOCUMENT'
-  | 'INTEGRATION'
-  | 'API_KEY'
-  | 'WEBHOOK'
-  | 'SETTINGS';
-
-export type AuditResult = 'SUCCESS' | 'FAILURE' | 'PARTIAL';
+export type { AuditAction, AuditResourceType, AuditResult };
 
 export interface AuditLogEntry {
   actorId: string;
-  actorRole: string;
+  actorRole: UserRole;
   actorIp?: string;
   actorDevice?: string;
   action: AuditAction;
@@ -59,7 +27,7 @@ export interface AuditLogEntry {
   result: AuditResult;
   organizationId?: string;
   metadata?: Record<string, unknown>;
-  errorMessage?: string;
+  details?: Record<string, unknown>;  // Alias for metadata
 }
 
 export interface AuditQueryOptions {
@@ -84,7 +52,7 @@ export class AuditService {
   private batchTimeout: NodeJS.Timeout | null = null;
   private readonly BATCH_SIZE = 100;
   private readonly BATCH_INTERVAL = 5000; // 5 seconds
-  private _redisAvailable = false;
+  private redisAvailable = false;
   private redisErrorLogged = false;
 
   constructor() {
@@ -122,18 +90,18 @@ export class AuditService {
           logger.warn('Audit Redis unavailable - using database only for audit logs');
           this.redisErrorLogged = true;
         }
-        this._redisAvailable = false;
+        this.redisAvailable = false;
       });
 
       this.redis.on('connect', () => {
         logger.info('Audit service connected to Redis');
-        this._redisAvailable = true;
+        this.redisAvailable = true;
         this.redisErrorLogged = false;
       });
 
       // Try to connect but don't block
       this.redis.connect().catch(() => {
-        this._redisAvailable = false;
+        this.redisAvailable = false;
       });
     } catch (error) {
       if (!this.redisErrorLogged) {
@@ -221,9 +189,8 @@ export class AuditService {
         resourceId: entry.resourceId,
         resourceName: entry.resourceName || null,
         result: entry.result,
-        organizationId: entry.organizationId || null,
-        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
-        errorMessage: entry.errorMessage || null,
+        organizationId: entry.organizationId || '',
+        details: (entry.details || entry.metadata || {}) as Prisma.InputJsonValue,
         timestamp: new Date(),
       }));
 
@@ -257,9 +224,8 @@ export class AuditService {
         resourceId: record.resourceId,
         resourceName: record.resourceName || null,
         result: record.result,
-        organizationId: record.organizationId || null,
-        metadata: record.metadata,
-        errorMessage: record.errorMessage || null,
+        organizationId: record.organizationId || '',
+        details: record.metadata || {},
         timestamp: record.timestamp,
       },
     });
@@ -324,7 +290,7 @@ export class AuditService {
   // --------------------------------------------------------------------------
 
   private async cacheAuditLog(record: any): Promise<void> {
-    if (!this.redis) return;
+    if (!this.redis || !this.redisAvailable) return;
 
     try {
       const key = `recent:${record.organizationId || 'global'}`;
@@ -340,7 +306,7 @@ export class AuditService {
     organizationId?: string,
     limit: number = 100
   ): Promise<any[]> {
-    if (!this.redis) {
+    if (!this.redis || !this.redisAvailable) {
       return this.query({
         organizationId,
         limit,
@@ -455,9 +421,9 @@ export class AuditService {
       'LOGIN',
       'LOGOUT',
       'EXPORT',
-      'SHARE',
-      'REVOKE',
-      'CONFIGURE',
+      'APPROVE',
+      'REJECT',
+      'REMOVE',
     ];
     return criticalActions.includes(action);
   }

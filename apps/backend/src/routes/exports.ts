@@ -125,10 +125,10 @@ router.get('/history', authenticate, async (req, res, next) => {
   try {
     const { type, limit, offset } = req.query;
 
-    const where: any = {};
-    if (type) where.type = type;
+    const where: any = { createdById: req.user!.id };
+    if (type) where.format = type;
 
-    const exports = await prisma.documentExport.findMany({
+    const exports = await prisma.exportedDocument.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: limit ? parseInt(limit as string) : 50,
@@ -144,7 +144,7 @@ router.get('/history', authenticate, async (req, res, next) => {
 // Get export by ID
 router.get('/:id', authenticate, async (req, res, next) => {
   try {
-    const exportRecord = await prisma.documentExport.findUnique({
+    const exportRecord = await prisma.exportedDocument.findUnique({
       where: { id: req.params.id },
     });
 

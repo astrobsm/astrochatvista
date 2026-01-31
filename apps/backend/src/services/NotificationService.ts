@@ -43,10 +43,10 @@ export class NotificationService {
       // Get user preferences
       const user = await prisma.user.findUnique({
         where: { id: notification.userId },
-        select: { settings: true },
+        select: { preferences: true },
       });
 
-      const preferences = (user?.settings as any)?.notifications as NotificationPreferences || this.getDefaultPreferences();
+      const preferences = (user?.preferences as any)?.notifications as NotificationPreferences || this.getDefaultPreferences();
 
       // Create database notification
       if (preferences.inApp) {
@@ -106,14 +106,13 @@ export class NotificationService {
     await prisma.notification.create({
       data: {
         userId: notification.userId,
-        type: notification.type,
+        type: notification.type as any,  // Cast to Prisma NotificationType
         title: notification.title,
-        message: notification.message,
+        body: notification.message,
         data: notification.data || {},
         actionUrl: notification.actionUrl,
-        priority: notification.priority || 'NORMAL',
         expiresAt: notification.expiresAt,
-        isRead: false,
+        read: false,
       },
     });
   }
@@ -195,7 +194,7 @@ export class NotificationService {
     } = {}
   ): Promise<{ notifications: any[]; total: number; unreadCount: number }> {
     const where: any = { userId };
-    if (options.unreadOnly) where.isRead = false;
+    if (options.unreadOnly) where.read = false;
     if (options.type) where.type = options.type;
 
     const [notifications, total, unreadCount] = await Promise.all([
@@ -206,7 +205,7 @@ export class NotificationService {
         skip: options.offset || 0,
       }),
       prisma.notification.count({ where }),
-      prisma.notification.count({ where: { userId, isRead: false } }),
+      prisma.notification.count({ where: { userId, read: false } }),
     ]);
 
     return { notifications, total, unreadCount };
@@ -215,14 +214,14 @@ export class NotificationService {
   async markAsRead(notificationId: string, userId: string): Promise<void> {
     await prisma.notification.updateMany({
       where: { id: notificationId, userId },
-      data: { isRead: true, readAt: new Date() },
+      data: { read: true },
     });
   }
 
   async markAllAsRead(userId: string): Promise<void> {
     await prisma.notification.updateMany({
-      where: { userId, isRead: false },
-      data: { isRead: true, readAt: new Date() },
+      where: { userId, read: false },
+      data: { read: true },
     });
   }
 

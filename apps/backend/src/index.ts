@@ -63,10 +63,11 @@ class Application {
         directives: {
           defaultSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", 'data:', 'blob:'],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           mediaSrc: ["'self'", 'blob:'],
-          connectSrc: ["'self'", 'wss:', 'ws:'],
+          connectSrc: ["'self'", 'wss:', 'ws:', 'https:'],
+          fontSrc: ["'self'", 'data:'],
         },
       },
       crossOriginEmbedderPolicy: false,
@@ -115,8 +116,17 @@ class Application {
     // Health check
     this.app.get('/health', async (_req: Request, res: Response) => {
       try {
+        // Check database
         await prisma.$queryRaw`SELECT 1`;
-        await redis.ping();
+        
+        // Check Redis (optional - may not be available in dev)
+        let redisStatus = 'unavailable';
+        try {
+          await redis.ping();
+          redisStatus = 'connected';
+        } catch {
+          redisStatus = 'unavailable (using in-memory fallback)';
+        }
         
         // Import storage service for health check
         const { storageService } = await import('./services/StorageService');
@@ -128,7 +138,7 @@ class Application {
           version: config.version,
           services: {
             database: 'connected',
-            redis: 'connected',
+            redis: redisStatus,
             mediaServer: this.mediaServer.isReady ? 'ready' : 'initializing',
             storage: {
               local: 'available',

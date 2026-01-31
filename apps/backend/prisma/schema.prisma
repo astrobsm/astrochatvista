@@ -679,10 +679,25 @@ model Recording {
   createdBy           User      @relation(fields: [createdById], references: [id])
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+  shares              RecordingShare[]
 
   @@index([meetingId])
   @@index([status])
   @@index([createdById])
+}
+
+model RecordingShare {
+  id                  String    @id @default(uuid())
+  recordingId         String
+  recording           Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  expiresAt           DateTime?
+  password            String?
+  allowDownload       Boolean   @default(true)
+  viewCount           Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([recordingId])
 }
 
 enum RecordingType {

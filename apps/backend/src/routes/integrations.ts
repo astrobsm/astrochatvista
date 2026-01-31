@@ -7,20 +7,32 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
+import { IntegrationType, IntegrationStatus } from '@prisma/client';
 
 const router: Router = Router();
 
 // All routes require authentication
 router.use(authenticate);
 
-// Get user's connected integrations
+// Get organization's connected integrations
 router.get('/', async (req: Request, res: Response) => {
   try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { organizationId: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
     const integrations = await prisma.integration.findMany({
-      where: { userId: req.user!.id },
+      where: { organizationId: user.organizationId },
       select: {
         id: true,
-        provider: true,
+        type: true,
+        name: true,
         status: true,
         scopes: true,
         createdAt: true,
@@ -40,6 +52,7 @@ router.get('/available', (_req: Request, res: Response) => {
   const availableIntegrations = [
     {
       id: 'google-calendar',
+      type: 'CALENDAR' as IntegrationType,
       name: 'Google Calendar',
       description: 'Sync meetings with Google Calendar',
       icon: 'google',
@@ -47,6 +60,7 @@ router.get('/available', (_req: Request, res: Response) => {
     },
     {
       id: 'outlook-calendar',
+      type: 'CALENDAR' as IntegrationType,
       name: 'Outlook Calendar',
       description: 'Sync meetings with Microsoft Outlook',
       icon: 'microsoft',
@@ -54,6 +68,7 @@ router.get('/available', (_req: Request, res: Response) => {
     },
     {
       id: 'slack',
+      type: 'COMMUNICATION' as IntegrationType,
       name: 'Slack',
       description: 'Get meeting notifications in Slack',
       icon: 'slack',
@@ -61,6 +76,7 @@ router.get('/available', (_req: Request, res: Response) => {
     },
     {
       id: 'notion',
+      type: 'PROJECT_MANAGEMENT' as IntegrationType,
       name: 'Notion',
       description: 'Export meeting notes to Notion',
       icon: 'notion',
@@ -68,10 +84,27 @@ router.get('/available', (_req: Request, res: Response) => {
     },
     {
       id: 'zapier',
+      type: 'CUSTOM' as IntegrationType,
       name: 'Zapier',
       description: 'Connect with 5000+ apps via Zapier',
       icon: 'zapier',
       scopes: [],
+    },
+    {
+      id: 'google-drive',
+      type: 'CLOUD_STORAGE' as IntegrationType,
+      name: 'Google Drive',
+      description: 'Store recordings in Google Drive',
+      icon: 'google',
+      scopes: ['drive.file'],
+    },
+    {
+      id: 'dropbox',
+      type: 'CLOUD_STORAGE' as IntegrationType,
+      name: 'Dropbox',
+      description: 'Store recordings in Dropbox',
+      icon: 'dropbox',
+      scopes: ['files.content.write'],
     },
   ];
 
@@ -79,8 +112,8 @@ router.get('/available', (_req: Request, res: Response) => {
 });
 
 // Initiate OAuth connection
-router.post('/connect/:provider', async (req: Request, res: Response): Promise<void> => {
-  const { provider } = req.params;
+router.post('/connect/:integrationType', async (req: Request, res: Response): Promise<void> => {
+  const { integrationType } = req.params;
   const { redirectUri } = req.body;
 
   try {
@@ -88,17 +121,14 @@ router.post('/connect/:provider', async (req: Request, res: Response): Promise<v
     const state = Buffer.from(
       JSON.stringify({
         userId: req.user!.id,
-        provider,
+        integrationType,
         timestamp: Date.now(),
       })
     ).toString('base64');
 
-    // Store state in Redis for verification
-    // await redis.setex(`oauth:state:${state}`, 600, 'valid');
-
     let authUrl: string;
 
-    switch (provider) {
+    switch (integrationType) {
       case 'google-calendar':
         authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
           `client_id=${process.env.GOOGLE_CLIENT_ID}&` +
@@ -128,20 +158,20 @@ router.post('/connect/:provider', async (req: Request, res: Response): Promise<v
         break;
 
       default:
-        res.status(400).json({ error: 'Unsupported provider' });
+        res.status(400).json({ error: 'Unsupported integration type' });
         return;
     }
 
     res.json({ authUrl, state });
   } catch (error) {
-    logger.error('Failed to initiate OAuth', { error, provider });
+    logger.error('Failed to initiate OAuth', { error, integrationType });
     res.status(500).json({ error: 'Failed to initiate connection' });
   }
 });
 
 // Handle OAuth callback
-router.post('/callback/:provider', async (req: Request, res: Response): Promise<void> => {
-  const { provider } = req.params;
+router.post('/callback/:integrationType', async (req: Request, res: Response): Promise<void> => {
+  const { integrationType } = req.params;
   const { code: _code, state } = req.body;
 
   try {
@@ -153,61 +183,104 @@ router.post('/callback/:provider', async (req: Request, res: Response): Promise<
       return;
     }
 
+    // Get user's organization
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { organizationId: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
     // Exchange code for tokens (implement for each provider)
     let tokens: { accessToken: string; refreshToken?: string; expiresAt?: Date };
+    let integType: IntegrationType;
+    let integName: string;
 
-    switch (provider) {
+    switch (integrationType) {
       case 'google-calendar':
-        // Exchange with Google
         tokens = { accessToken: 'mock', refreshToken: 'mock' };
+        integType = 'CALENDAR';
+        integName = 'Google Calendar';
         break;
       case 'outlook-calendar':
-        // Exchange with Microsoft
         tokens = { accessToken: 'mock', refreshToken: 'mock' };
+        integType = 'CALENDAR';
+        integName = 'Outlook Calendar';
         break;
       case 'slack':
-        // Exchange with Slack
         tokens = { accessToken: 'mock' };
+        integType = 'COMMUNICATION';
+        integName = 'Slack';
         break;
       default:
-        res.status(400).json({ error: 'Unsupported provider' });
+        res.status(400).json({ error: 'Unsupported integration type' });
         return;
     }
 
-    // Store integration
-    const integration = await prisma.integration.upsert({
+    // Check if integration already exists
+    const existingIntegration = await prisma.integration.findFirst({
       where: {
-        userId_provider: {
-          userId: req.user!.id,
-          provider,
-        },
-      },
-      update: {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiresAt: tokens.expiresAt,
-        status: 'connected',
-      },
-      create: {
-        userId: req.user!.id,
-        provider,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiresAt: tokens.expiresAt,
-        status: 'connected',
+        organizationId: user.organizationId,
+        type: integType,
+        name: integName,
       },
     });
+
+    let integration;
+    
+    if (existingIntegration) {
+      // Update existing
+      integration = await prisma.integration.update({
+        where: { id: existingIntegration.id },
+        data: {
+          config: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: tokens.expiresAt?.toISOString(),
+          },
+          credentials: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+          },
+          status: IntegrationStatus.ACTIVE,
+        },
+      });
+    } else {
+      // Create new
+      integration = await prisma.integration.create({
+        data: {
+          organizationId: user.organizationId,
+          type: integType,
+          name: integName,
+          config: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: tokens.expiresAt?.toISOString(),
+          },
+          credentials: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+          },
+          status: IntegrationStatus.ACTIVE,
+          createdById: req.user!.id,
+        },
+      });
+    }
 
     res.json({
       success: true,
       integration: {
         id: integration.id,
-        provider: integration.provider,
+        type: integration.type,
+        name: integration.name,
         status: integration.status,
       },
     });
   } catch (error) {
-    logger.error('OAuth callback failed', { error, provider });
+    logger.error('OAuth callback failed', { error, integrationType });
     res.status(500).json({ error: 'Failed to complete connection' });
   }
 });
@@ -217,10 +290,20 @@ router.delete('/:integrationId', async (req: Request, res: Response): Promise<vo
   const { integrationId } = req.params;
 
   try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { organizationId: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
     const integration = await prisma.integration.findFirst({
       where: {
         id: integrationId,
-        userId: req.user!.id,
+        organizationId: user.organizationId,
       },
     });
 
@@ -242,15 +325,25 @@ router.delete('/:integrationId', async (req: Request, res: Response): Promise<vo
   }
 });
 
-// Sync calendar
+// Sync integration
 router.post('/:integrationId/sync', async (req: Request, res: Response): Promise<void> => {
   const { integrationId } = req.params;
 
   try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { organizationId: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
     const integration = await prisma.integration.findFirst({
       where: {
         id: integrationId,
-        userId: req.user!.id,
+        organizationId: user.organizationId,
       },
     });
 

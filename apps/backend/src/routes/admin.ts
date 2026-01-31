@@ -87,10 +87,7 @@ router.get('/departments', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), 
     const departments = await prisma.department.findMany({
       where: { organizationId: user!.organizationId! },
       include: {
-        _count: { select: { members: true } },
-        manager: {
-          select: { id: true, name: true, email: true },
-        },
+        _count: { select: { users: true } },
       },
       orderBy: { name: 'asc' },
     });
@@ -109,7 +106,7 @@ router.post('/departments', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'),
       select: { organizationId: true },
     });
 
-    const { name, description, managerId } = req.body;
+    const { name, managerId } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
@@ -118,7 +115,6 @@ router.post('/departments', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'),
     const department = await prisma.department.create({
       data: {
         name,
-        description,
         organizationId: user!.organizationId!,
         managerId,
       },
@@ -133,13 +129,12 @@ router.post('/departments', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'),
 // Update department
 router.patch('/departments/:id', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async (req, res, next) => {
   try {
-    const { name, description, managerId } = req.body;
+    const { name, managerId } = req.body;
 
     const department = await prisma.department.update({
       where: { id: req.params.id },
       data: {
         ...(name && { name }),
-        ...(description !== undefined && { description }),
         ...(managerId !== undefined && { managerId }),
       },
     });
@@ -208,7 +203,7 @@ router.post('/integrations', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN')
       select: { organizationId: true },
     });
 
-    const { type, name, credentials, settings } = req.body;
+    const { type, name, credentials, config } = req.body;
 
     const integration = await prisma.integration.create({
       data: {
@@ -216,7 +211,7 @@ router.post('/integrations', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN')
         name,
         organizationId: user!.organizationId!,
         credentials, // Should be encrypted in production
-        settings,
+        config: config || {},
         status: 'PENDING',
         createdById: req.user!.id,
       },
@@ -262,13 +257,11 @@ router.get('/webhooks', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), asy
       where: { organizationId: user!.organizationId! },
       select: {
         id: true,
-        name: true,
         url: true,
         events: true,
-        isActive: true,
+        status: true,
         createdAt: true,
         lastTriggeredAt: true,
-        successCount: true,
         failureCount: true,
       },
     });
@@ -287,7 +280,7 @@ router.post('/webhooks', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), as
       select: { organizationId: true },
     });
 
-    const { name, url, events, secret, headers } = req.body;
+    const { url, events, secret, headers } = req.body;
 
     if (!url || !events || !Array.isArray(events)) {
       return res.status(400).json({ error: 'URL and events are required' });
@@ -295,14 +288,12 @@ router.post('/webhooks', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), as
 
     const webhook = await prisma.webhook.create({
       data: {
-        name: name || 'Webhook',
         url,
         events,
-        secret, // Should be hashed
+        secret: secret || require('crypto').randomBytes(32).toString('hex'),
         headers: headers || {},
         organizationId: user!.organizationId!,
-        createdById: req.user!.id,
-        isActive: true,
+        status: 'ACTIVE',
       },
     });
 
@@ -315,15 +306,14 @@ router.post('/webhooks', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), as
 // Update webhook
 router.patch('/webhooks/:id', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async (req, res, next) => {
   try {
-    const { name, url, events, isActive, headers } = req.body;
+    const { url, events, status, headers } = req.body;
 
     const webhook = await prisma.webhook.update({
       where: { id: req.params.id },
       data: {
-        ...(name && { name }),
         ...(url && { url }),
         ...(events && { events }),
-        ...(isActive !== undefined && { isActive }),
+        ...(status !== undefined && { status }),
         ...(headers && { headers }),
       },
     });
@@ -414,8 +404,8 @@ router.get('/audit-logs', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), a
       prisma.auditLog.findMany({
         where,
         include: {
-          user: {
-            select: { id: true, name: true, email: true },
+          actor: {
+            select: { id: true, displayName: true, email: true },
           },
         },
         orderBy: { timestamp: 'desc' },
@@ -443,7 +433,11 @@ router.get('/settings', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), asy
       include: { organization: true },
     });
 
-    res.json(user?.organization?.settings || {});
+    res.json({
+      complianceSettings: user?.organization?.complianceSettings || {},
+      brandingConfig: user?.organization?.brandingConfig || {},
+      ssoConfig: user?.organization?.ssoConfig || null,
+    });
   } catch (error) {
     return next(error);
   }
@@ -457,12 +451,22 @@ router.patch('/settings', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), a
       select: { organizationId: true },
     });
 
+    const { complianceSettings, brandingConfig, ssoConfig } = req.body;
+
     const organization = await prisma.organization.update({
       where: { id: user!.organizationId! },
-      data: { settings: req.body },
+      data: {
+        ...(complianceSettings && { complianceSettings }),
+        ...(brandingConfig && { brandingConfig }),
+        ...(ssoConfig !== undefined && { ssoConfig }),
+      },
     });
 
-    res.json(organization.settings);
+    res.json({
+      complianceSettings: organization.complianceSettings,
+      brandingConfig: organization.brandingConfig,
+      ssoConfig: organization.ssoConfig,
+    });
   } catch (error) {
     return next(error);
   }

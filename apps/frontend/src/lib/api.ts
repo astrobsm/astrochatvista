@@ -3,7 +3,10 @@
 // Centralized API client for all backend requests
 // ============================================================================
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1` : 'http://localhost:4000/api/v1';
+// Use relative URLs when served from backend, absolute in dev mode
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL 
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1` 
+  : '/api/v1';
 
 // Token management
 let accessToken: string | null = null;
@@ -250,7 +253,13 @@ export const meetingsApi = {
     }),
 
   list: (params?: { page?: number; limit?: number; status?: string }) => {
-    const query = new URLSearchParams(params as any).toString();
+    // Filter out undefined values to prevent status=undefined being sent
+    const filteredParams = params
+      ? Object.fromEntries(
+          Object.entries(params).filter(([_, v]) => v !== undefined)
+        )
+      : {};
+    const query = new URLSearchParams(filteredParams as any).toString();
     return apiRequest<{ meetings: any[]; total: number; page: number }>(
       `/meetings${query ? `?${query}` : ''}`
     );

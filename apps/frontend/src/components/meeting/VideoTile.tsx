@@ -41,10 +41,42 @@ export function VideoTile({
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showControls, setShowControls] = useState(false);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const videoElement = videoRef.current;
+    if (videoElement && stream) {
+      videoElement.srcObject = stream;
+      
+      // Check if stream has video tracks
+      const videoTracks = stream.getVideoTracks();
+      setHasVideoTrack(videoTracks.length > 0 && videoTracks[0].enabled);
+      
+      // Ensure video plays
+      videoElement.play().catch((err) => {
+        console.log('Video play failed:', err);
+      });
+
+      // Listen for track changes
+      const handleTrackChange = () => {
+        const tracks = stream.getVideoTracks();
+        setHasVideoTrack(tracks.length > 0 && tracks[0].enabled);
+      };
+
+      stream.addEventListener('addtrack', handleTrackChange);
+      stream.addEventListener('removetrack', handleTrackChange);
+      
+      // Listen for track enabled/disabled changes
+      videoTracks.forEach(track => {
+        track.onended = handleTrackChange;
+        track.onmute = handleTrackChange;
+        track.onunmute = handleTrackChange;
+      });
+
+      return () => {
+        stream.removeEventListener('addtrack', handleTrackChange);
+        stream.removeEventListener('removetrack', handleTrackChange);
+      };
     }
   }, [stream]);
 
@@ -68,13 +100,22 @@ export function VideoTile({
     >
       {/* Video or Avatar */}
       {!isVideoOff && stream ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isLocal}
-          className={`w-full h-full object-cover ${isLocal && !isScreenShare ? 'transform -scale-x-100' : ''}`}
-        />
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted={isLocal}
+            className={`w-full h-full object-cover ${isLocal && !isScreenShare ? 'transform -scale-x-100' : ''} ${!hasVideoTrack ? 'hidden' : ''}`}
+          />
+          {!hasVideoTrack && (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-2xl font-bold text-white">
+                {initials}
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
           <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-2xl font-bold text-white">

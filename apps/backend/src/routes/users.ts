@@ -75,11 +75,14 @@ router.post('/me/change-password', authenticate, async (req, res, next) => {
       where: { id: req.user!.id },
     });
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    if (!user || !user.passwordHash) {
+      return res.status(404).json({ error: 'User not found or no password set' });
     }
 
     // Verify current password
+    if (!user.passwordHash) {
+      return res.status(400).json({ error: 'Password not set for this user' });
+    }
     const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) {
       return res.status(401).json({ error: 'Current password is incorrect' });
@@ -105,9 +108,9 @@ router.get('/me/preferences', authenticate, async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
       select: {
-        settings: true,
+        preferences: true,
         timezone: true,
-        language: true,
+        locale: true,
       },
     });
 
@@ -120,19 +123,19 @@ router.get('/me/preferences', authenticate, async (req, res, next) => {
 // Update user preferences
 router.patch('/me/preferences', authenticate, async (req, res, next) => {
   try {
-    const { settings, timezone, language } = req.body;
+    const { preferences, timezone, locale } = req.body;
 
     const user = await prisma.user.update({
       where: { id: req.user!.id },
       data: {
-        ...(settings && { settings }),
+        ...(preferences && { preferences }),
         ...(timezone && { timezone }),
-        ...(language && { language }),
+        ...(locale && { locale }),
       },
       select: {
-        settings: true,
+        preferences: true,
         timezone: true,
-        language: true,
+        locale: true,
       },
     });
 
@@ -163,8 +166,10 @@ router.get('/', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async (req,
     const where: any = { organizationId: user.organizationId };
     if (search) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
+        { displayName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
       ];
     }
     if (role) where.role = role;
@@ -177,17 +182,19 @@ router.get('/', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async (req,
         select: {
           id: true,
           email: true,
-          name: true,
-          avatar: true,
+          displayName: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
           role: true,
           status: true,
           department: true,
           createdAt: true,
-          lastLogin: true,
+          lastLoginAt: true,
         },
         take: limit ? parseInt(limit as string) : 50,
         skip: offset ? parseInt(offset as string) : 0,
-        orderBy: { name: 'asc' },
+        orderBy: { displayName: 'asc' },
       }),
       prisma.user.count({ where }),
     ]);
@@ -241,13 +248,18 @@ router.post('/', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async (req
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const nameParts = name.split(' ');
+    const firstName = nameParts[0] || name;
+    const lastName = nameParts.slice(1).join(' ') || '';
 
     const user = await prisma.user.create({
       data: {
         email,
-        name,
+        firstName,
+        lastName,
+        displayName: name,
         passwordHash,
-        role: role || 'USER',
+        role: role || 'PARTICIPANT',
         organizationId: currentUser!.organizationId,
         departmentId,
         status: 'ACTIVE',
@@ -267,14 +279,20 @@ router.patch('/:id', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async 
   try {
     const { name, role, status, departmentId } = req.body;
 
+    // Parse name into firstName/lastName/displayName if provided
+    const nameUpdate = name ? {
+      displayName: name,
+      firstName: name.split(' ')[0] || name,
+      lastName: name.split(' ').slice(1).join(' ') || '',
+    } : {};
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: {
-        ...(name && { name }),
+        ...nameUpdate,
         ...(role && { role }),
         ...(status && { status }),
         ...(departmentId !== undefined && { departmentId }),
-        updatedAt: new Date(),
       },
     });
 
@@ -306,14 +324,13 @@ router.delete('/:id', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async
 // Suspend user (Admin only)
 router.post('/:id/suspend', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN'), async (req, res, next) => {
   try {
-    const { reason } = req.body;
+    const { reason: _reason } = req.body;
 
     await prisma.user.update({
       where: { id: req.params.id },
       data: {
         status: 'SUSPENDED',
-        suspendedAt: new Date(),
-        suspendReason: reason,
+        // Note: suspendedAt and suspendReason not in schema - would need migration
       },
     });
 
@@ -330,8 +347,6 @@ router.post('/:id/reactivate', authenticate, authorize('SUPER_ADMIN', 'ORG_ADMIN
       where: { id: req.params.id },
       data: {
         status: 'ACTIVE',
-        suspendedAt: null,
-        suspendReason: null,
       },
     });
 
@@ -364,15 +379,17 @@ router.get('/search', authenticate, async (req, res, next) => {
         organizationId: user?.organizationId,
         status: 'ACTIVE',
         OR: [
-          { name: { contains: q as string, mode: 'insensitive' } },
+          { displayName: { contains: q as string, mode: 'insensitive' } },
           { email: { contains: q as string, mode: 'insensitive' } },
+          { firstName: { contains: q as string, mode: 'insensitive' } },
+          { lastName: { contains: q as string, mode: 'insensitive' } },
         ],
       },
       select: {
         id: true,
-        name: true,
+        displayName: true,
         email: true,
-        avatar: true,
+        avatarUrl: true,
       },
       take: limit ? parseInt(limit as string) : 10,
     });

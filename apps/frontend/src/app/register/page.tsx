@@ -7,6 +7,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Eye,
@@ -70,7 +71,12 @@ export default function RegisterPage() {
       router.push('/login?registered=true');
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        // Provide user-friendly messages for common errors
+        if (err.status === 409) {
+          setError('This email is already registered. Please use a different email or log in.');
+        } else {
+          setError(err.message);
+        }
       } else {
         setError('An unexpected error occurred');
       }
@@ -84,13 +90,11 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center gap-3 mb-8">
-          <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl">
-            <Video className="w-8 h-8 text-white" />
-          </div>
+          <Image src="/logo.png" alt="ChatVista" width={48} height={48} className="w-12 h-12 rounded-xl" />
           <span className="text-2xl font-bold text-white">ChatVista</span>
         </Link>
 
-        {/* Register card */}
+        {/* Register card */}}
         <div className="bg-gray-800/50 backdrop-blur border border-gray-700 rounded-2xl p-8 shadow-2xl">
           <div className="text-center mb-8">
             <h1 className="text-2xl font-bold text-white">Create your account</h1>

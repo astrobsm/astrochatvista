@@ -7,6 +7,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Video, Home, ArrowLeft, Search } from 'lucide-react';
 
 export default function NotFound() {
@@ -15,9 +16,7 @@ export default function NotFound() {
       <div className="max-w-lg w-full text-center">
         {/* Logo */}
         <Link href="/" className="inline-flex items-center gap-2 mb-8">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-            <Video className="w-6 h-6 text-white" />
-          </div>
+          <Image src="/logo.png" alt="ChatVista" width={40} height={40} className="w-10 h-10 rounded-lg" />
           <span className="text-2xl font-bold text-white">ChatVista</span>
         </Link>
 

@@ -5,18 +5,28 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Mail, Lock, Video, ArrowRight, Loader2 } from 'lucide-react';
-import { authApi, ApiError } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { ApiError } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login, verifyMfa, isAuthenticated, isLoading: authLoading } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.push('/dashboard');
+    }
+  }, [authLoading, isAuthenticated, router]);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -30,7 +40,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const result = await authApi.login(formData);
+      const result = await login(formData.email, formData.password);
 
       if (result.requiresMfa) {
         setRequiresMfa(true);
@@ -55,7 +65,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      await authApi.verifyMfa({ mfaToken, code: mfaCode });
+      await verifyMfa(mfaToken, mfaCode);
       router.push('/dashboard');
     } catch (err) {
       if (err instanceof ApiError) {
@@ -137,9 +147,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center gap-3 mb-8">
-          <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl">
-            <Video className="w-8 h-8 text-white" />
-          </div>
+          <Image src="/logo.png" alt="ChatVista" width={48} height={48} className="w-12 h-12 rounded-xl" />
           <span className="text-2xl font-bold text-white">ChatVista</span>
         </Link>
 

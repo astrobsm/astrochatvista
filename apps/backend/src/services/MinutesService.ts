@@ -4,6 +4,7 @@
 // ============================================================================
 
 import OpenAI from 'openai';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { safePublish } from '../lib/redis';
 import { config } from '../config';
@@ -293,47 +294,50 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
     meetingId: string,
     data: MeetingMinutesData
   ): Promise<any> {
-    // Create minutes record
+    // Create minutes record with schema-aligned fields
     const minutes = await prisma.meetingMinutes.create({
       data: {
         meetingId,
-        title: data.title,
-        summary: data.summary,
-        executiveSummary: data.executiveSummary,
-        sections: data.sections,
-        keyPoints: data.keyPoints,
-        topics: data.topics,
-        sentiment: data.sentiment,
-        followUps: data.followUps,
+        header: {
+          title: data.title,
+          summary: data.summary,
+          executiveSummary: data.executiveSummary,
+        } as Prisma.InputJsonValue,
+        discussions: (data.sections || []) as unknown as Prisma.InputJsonValue,
+        decisions: data.decisions.map(d => ({
+          description: d.description,
+          context: d.context,
+          participants: d.participants,
+          confidence: d.confidence,
+        })) as unknown as Prisma.InputJsonValue,
+        metadata: {
+          keyPoints: data.keyPoints as unknown,
+          topics: data.topics,
+          sentiment: data.sentiment,
+          followUps: data.followUps,
+        } as Prisma.InputJsonValue,
         status: 'DRAFT',
         version: 1,
+        attendance: [] as Prisma.InputJsonValue,
       },
     });
 
-    // Create action items
-    for (const item of data.actionItems) {
+    // Create action items - ensure required fields are present
+    for (let i = 0; i < data.actionItems.length; i++) {
+      const item = data.actionItems[i];
+      if (!item.assigneeId) continue; // Skip if no assignee
+      
       await prisma.actionItem.create({
         data: {
           minutesId: minutes.id,
+          number: i + 1,
+          title: item.description,
           description: item.description,
-          assigneeName: item.assignee,
           assigneeId: item.assigneeId,
+          reporterId: item.assigneeId, // Default reporter to assignee
           dueDate: item.dueDate,
-          priority: item.priority,
-          status: item.status,
-        },
-      });
-    }
-
-    // Create decisions
-    for (const decision of data.decisions) {
-      await prisma.decision.create({
-        data: {
-          minutesId: minutes.id,
-          description: decision.description,
-          context: decision.context,
-          participants: decision.participants,
-          confidence: decision.confidence,
+          priority: item.priority as any,
+          status: item.status as any,
         },
       });
     }
@@ -346,7 +350,6 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
       where: { id: minutesId },
       include: {
         actionItems: true,
-        decisions: true,
         meeting: {
           include: {
             participants: {
@@ -369,7 +372,6 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
       where: { meetingId },
       include: {
         actionItems: true,
-        decisions: true,
       },
       orderBy: { version: 'desc' },
     });
@@ -457,7 +459,7 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
       where: { id: minutesId },
       data: {
         ...updates,
-        status: 'EDITING',
+        status: 'UNDER_REVIEW',
       },
     });
   }
@@ -466,12 +468,20 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
     minutesId: string,
     approverId: string
   ): Promise<any> {
+    // Create approval record
+    await prisma.approvalRecord.create({
+      data: {
+        minutesId,
+        approverId,
+        status: 'APPROVED',
+      },
+    });
+
+    // Update minutes status
     const minutes = await prisma.meetingMinutes.update({
       where: { id: minutesId },
       data: {
         status: 'APPROVED',
-        approvedBy: approverId,
-        approvedAt: new Date(),
       },
     });
 
@@ -542,19 +552,19 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
 
     const newContent = response.choices[0]?.message?.content || '';
 
-    // Update the section in database
-    const sections = minutes.sections as MinutesSection[];
-    const sectionIndex = sections.findIndex((s) => s.title === sectionTitle);
+    // Update the section in database - use discussions field
+    const discussions = (minutes.discussions as MinutesSection[]) || [];
+    const sectionIndex = discussions.findIndex((s) => s.title === sectionTitle);
 
     if (sectionIndex >= 0) {
-      sections[sectionIndex].content = newContent;
+      discussions[sectionIndex].content = newContent;
     } else {
-      sections.push({ title: sectionTitle, content: newContent });
+      discussions.push({ title: sectionTitle, content: newContent });
     }
 
     await prisma.meetingMinutes.update({
       where: { id: minutesId },
-      data: { sections },
+      data: { discussions: discussions as unknown as Prisma.InputJsonValue },
     });
 
     return { title: sectionTitle, content: newContent };
@@ -576,23 +586,32 @@ Please analyze this meeting transcript and generate comprehensive meeting minute
       customFields: { name: string; type: string }[];
     }
   ): Promise<any> {
-    return prisma.minutesTemplate.create({
+    return prisma.exportTemplate.create({
       data: {
         organizationId,
         name: data.name,
-        description: data.description,
-        sections: data.sections,
-        includeActionItems: data.includeActionItems,
-        includeDecisions: data.includeDecisions,
-        includeSentiment: data.includeSentiment,
-        customFields: data.customFields,
+        type: 'CUSTOM',
+        headerHtml: `<h1>${data.name}</h1><p>${data.description || ''}</p>`,
+        margins: {
+          top: 72,
+          right: 72,
+          bottom: 72,
+          left: 72,
+          config: {
+            sections: data.sections,
+            includeActionItems: data.includeActionItems,
+            includeDecisions: data.includeDecisions,
+            includeSentiment: data.includeSentiment,
+            customFields: data.customFields,
+          },
+        },
         isDefault: false,
       },
     });
   }
 
   async getTemplates(organizationId: string): Promise<any[]> {
-    return prisma.minutesTemplate.findMany({
+    return prisma.exportTemplate.findMany({
       where: { organizationId },
       orderBy: { name: 'asc' },
     });

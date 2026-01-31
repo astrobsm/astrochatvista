@@ -7,39 +7,23 @@ import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, 
   MessageSquare, Users, Settings, MoreVertical,
   Hand, Smile, Share2, Circle, FileText, 
-  ChevronUp, Maximize2, Grid, PanelRightOpen, Loader2
+  ChevronUp, Maximize2, Grid, PanelRightOpen
 } from 'lucide-react';
 import { useMeetingStore } from '@/store/meeting';
 import { useMediaDevices } from '@/hooks/useMediaDevices';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import { VideoTile } from '@/components/meeting/VideoTile';
 import { ChatPanel } from '@/components/meeting/ChatPanel';
 import { ParticipantsPanel } from '@/components/meeting/ParticipantsPanel';
 import { ControlButton } from '@/components/meeting/ControlButton';
 import { TranscriptPanel } from '@/components/meeting/TranscriptPanel';
-import { PreJoinScreen } from '@/components/meeting/PreJoinScreen';
-import { meetingsApi } from '@/lib/api';
 
-interface MeetingDetails {
-  id: string;
-  title: string;
-  description?: string;
-  hostId: string;
-  status: string;
+interface MeetingRoomProps {
+  meetingId: string;
 }
 
-export default function MeetingRoom() {
-  const params = useParams();
+export default function MeetingRoom({ meetingId }: MeetingRoomProps) {
   const router = useRouter();
-  const meetingId = params.id as string;
-
-  // Meeting details state
-  const [meetingDetails, setMeetingDetails] = useState<MeetingDetails | null>(null);
-  const [isLoadingDetails, setIsLoadingDetails] = useState(true);
-
-  // Pre-join state
-  const [hasJoined, setHasJoined] = useState(false);
-  const [isJoining, setIsJoining] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
 
   const [sidePanel, setSidePanel] = useState<'chat' | 'participants' | 'transcript' | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -55,80 +39,15 @@ export default function MeetingRoom() {
     isHandRaised,
     participants,
     localStream,
-    chatMessages,
     toggleMute,
     toggleVideo,
     toggleScreenShare,
     toggleRecording,
     toggleHandRaise,
     leaveMeeting,
-    setLocalStream,
-    initializeMedia,
-    sendChatMessage,
   } = useMeetingStore();
 
-  const { devices, selectedDevices, selectDevice, getMediaStream, stream: previewStream, stopStream } = useMediaDevices();
-
-  // Fetch meeting details on mount
-  useEffect(() => {
-    const fetchMeetingDetails = async () => {
-      if (!meetingId) return;
-      
-      try {
-        setIsLoadingDetails(true);
-        const details = await meetingsApi.get(meetingId);
-        setMeetingDetails(details);
-      } catch (error) {
-        console.error('Failed to fetch meeting details:', error);
-        // Set a fallback title if fetch fails
-        setMeetingDetails({
-          id: meetingId,
-          title: `Meeting ${meetingId.slice(0, 8)}...`,
-          hostId: '',
-          status: 'SCHEDULED',
-        });
-      } finally {
-        setIsLoadingDetails(false);
-      }
-    };
-
-    fetchMeetingDetails();
-  }, [meetingId]);
-
-  // Handle joining the meeting
-  const handleJoinMeeting = async (options: { audioEnabled: boolean; videoEnabled: boolean }) => {
-    setIsJoining(true);
-    setJoinError(null);
-
-    try {
-      // Initialize local media stream
-      const stream = await initializeMedia({
-        audio: options.audioEnabled,
-        video: options.videoEnabled,
-      });
-
-      // Allow joining even without media (might be permission denied)
-      if (!stream) {
-        console.warn('Joining meeting without media stream - permissions may be denied');
-      }
-
-      // Stop preview stream since we now have the meeting stream
-      stopStream();
-
-      setHasJoined(true);
-    } catch (error) {
-      console.error('Failed to join meeting:', error);
-      // Still allow joining, just show a warning
-      setJoinError('Media access failed - joining without camera/mic');
-      setTimeout(() => {
-        setHasJoined(true);
-        setIsJoining(false);
-      }, 1500);
-      return;
-    } finally {
-      setIsJoining(false);
-    }
-  };
+  const { devices, selectedDevices, selectDevice, getMediaStream } = useMediaDevices();
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -203,30 +122,6 @@ export default function MeetingRoom() {
 
   const participantCount = participants.length + 1; // +1 for self
 
-  // Show loading state while fetching meeting details
-  if (isLoadingDetails) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-400">Loading meeting...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show pre-join screen if not yet joined
-  if (!hasJoined) {
-    return (
-      <PreJoinScreen
-        meetingTitle={meetingDetails?.title || `Meeting ${meetingId?.slice(0, 8) || 'Unknown'}...`}
-        onJoin={handleJoinMeeting}
-        isJoining={isJoining}
-        error={joinError}
-      />
-    );
-  }
-
   return (
     <div 
       className="meeting-room"
@@ -237,8 +132,8 @@ export default function MeetingRoom() {
         <div className="flex items-center gap-4">
           <Image src="/logo.png" alt="ChatVista" width={32} height={32} className="h-8 w-8 rounded-lg" />
           <div>
-            <h1 className="text-white font-medium">{meetingDetails?.title || 'Meeting'}</h1>
-            <p className="text-sm text-gray-400">Meeting ID: {meetingId?.slice(0, 8)}...</p>
+            <h1 className="text-white font-medium">Team Standup</h1>
+            <p className="text-sm text-gray-400">Meeting ID: {meetingId}</p>
           </div>
         </div>
 
@@ -314,33 +209,9 @@ export default function MeetingRoom() {
             </div>
             
             <div className="flex-1 overflow-hidden">
-              {sidePanel === 'chat' && (
-                <ChatPanel 
-                  meetingId={meetingId}
-                  messages={chatMessages}
-                  currentUserId="local"
-                  participants={participants.map(p => ({ id: p.id, name: p.name }))}
-                  onSendMessage={sendChatMessage}
-                  onClose={() => setSidePanel(null)}
-                />
-              )}
-              {sidePanel === 'participants' && (
-                <ParticipantsPanel 
-                  participants={[
-                    { id: 'local', name: 'You', isMuted, isVideoOff, isHandRaised, isHost: true },
-                    ...participants
-                  ]}
-                  currentUserId="local"
-                  isHost={true}
-                  onClose={() => setSidePanel(null)}
-                />
-              )}
-              {sidePanel === 'transcript' && (
-                <TranscriptPanel 
-                  meetingId={meetingId}
-                  onClose={() => setSidePanel(null)}
-                />
-              )}
+              {sidePanel === 'chat' && <ChatPanel meetingId={meetingId} />}
+              {sidePanel === 'participants' && <ParticipantsPanel participants={participants} />}
+              {sidePanel === 'transcript' && <TranscriptPanel meetingId={meetingId} />}
             </div>
           </aside>
         )}

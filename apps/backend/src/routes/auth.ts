@@ -110,6 +110,7 @@ router.post(
       res.json({
         message: 'Login successful',
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         expiresIn: result.expiresIn,
         user: result.user,
       });
@@ -168,6 +169,7 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction):
 
     res.json({
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
       expiresIn: result.expiresIn,
     });
   } catch (error) {

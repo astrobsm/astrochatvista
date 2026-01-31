@@ -1,9 +1,9 @@
 // ============================================================================
 // CHATVISTA - NextAuth.js Configuration
-// Authentication API routes
+// Shared auth options
 // ============================================================================
 
-import NextAuth, { NextAuthOptions } from 'next-auth';
+import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -48,6 +48,7 @@ export const authOptions: NextAuthOptions = {
               accessToken: data.accessToken,
               refreshToken: data.refreshToken,
               role: data.user.role,
+              createdAt: data.user.createdAt,
             };
           }
 
@@ -89,7 +90,3 @@ export const authOptions: NextAuthOptions = {
   },
   secret: process.env.NEXTAUTH_SECRET,
 };
-
-const handler = NextAuth(authOptions);
-
-export { handler as GET, handler as POST };

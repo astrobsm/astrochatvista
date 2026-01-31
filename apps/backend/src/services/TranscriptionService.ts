@@ -4,6 +4,7 @@
 // ============================================================================
 
 import OpenAI from 'openai';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { safePublish } from '../lib/redis';
 import { config } from '../config';
@@ -406,7 +407,7 @@ export class TranscriptionService extends EventEmitter {
         endTime: segment.endTime,
         confidence: segment.confidence,
         language: segment.language,
-        words: segment.words,
+        words: segment.words as unknown as Prisma.InputJsonValue,
       },
     });
   }

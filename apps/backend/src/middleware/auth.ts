@@ -117,13 +117,15 @@ export const requireAdmin = (
   next();
 };
 
-// Host role check for meetings
+// Host role check for meetings - allows any authenticated user to create/host meetings
 export const requireHostRole = (
   req: Request,
   _res: Response,
   next: NextFunction
 ) => {
-  const hostRoles = ['SUPER_ADMIN', 'ORG_ADMIN', 'HOST', 'CO_HOST'];
+  // Allow any authenticated user to create and host meetings
+  // PARTICIPANT, OBSERVER, AUDITOR can all create meetings in the app
+  const hostRoles = ['SUPER_ADMIN', 'ORG_ADMIN', 'DEPT_ADMIN', 'HOST', 'CO_HOST', 'PARTICIPANT', 'OBSERVER', 'AUDITOR'];
   
   if (!req.user || !hostRoles.includes(req.user.role)) {
     return next(new AppError('Host privileges required', 403));

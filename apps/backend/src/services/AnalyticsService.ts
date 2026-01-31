@@ -67,7 +67,7 @@ export class AnalyticsService {
     const meetings = await prisma.meeting.findMany({
       where: {
         organizationId,
-        scheduledStart: { gte: range.from, lte: range.to },
+        scheduledStartTime: { gte: range.from, lte: range.to },
         status: { not: 'CANCELLED' },
       },
       include: {
@@ -78,8 +78,8 @@ export class AnalyticsService {
     const completedMeetings = meetings.filter((m: any) => m.status === 'ENDED');
     
     const totalDuration = completedMeetings.reduce((sum: number, m: any) => {
-      if (m.actualEnd && m.actualStart) {
-        return sum + (m.actualEnd.getTime() - m.actualStart.getTime()) / 60000;
+      if (m.actualEndTime && m.actualStartTime) {
+        return sum + (m.actualEndTime.getTime() - m.actualStartTime.getTime()) / 60000;
       }
       return sum;
     }, 0);
@@ -115,7 +115,7 @@ export class AnalyticsService {
       prisma.user.count({
         where: {
           organizationId,
-          lastLogin: { gte: range.from },
+          lastLoginAt: { gte: range.from },
         },
       }),
       prisma.user.count({
@@ -141,7 +141,7 @@ export class AnalyticsService {
     const meetingIds = await prisma.meeting.findMany({
       where: {
         organizationId,
-        scheduledStart: { gte: range.from, lte: range.to },
+        scheduledStartTime: { gte: range.from, lte: range.to },
       },
       select: { id: true },
     }).then((meetings: any[]) => meetings.map((m: any) => m.id));
@@ -172,10 +172,10 @@ export class AnalyticsService {
     const meetings = await prisma.meeting.findMany({
       where: {
         organizationId,
-        scheduledStart: { gte: range.from, lte: range.to },
+        scheduledStartTime: { gte: range.from, lte: range.to },
       },
       select: {
-        scheduledStart: true,
+        scheduledStartTime: true,
         _count: { select: { participants: true } },
       },
     });
@@ -184,7 +184,8 @@ export class AnalyticsService {
     const dailyStats = new Map<string, { meetings: number; participants: number }>();
 
     for (const meeting of meetings) {
-      const date = meeting.scheduledStart.toISOString().split('T')[0];
+      if (!meeting.scheduledStartTime) continue;
+      const date = meeting.scheduledStartTime.toISOString().split('T')[0];
       const current = dailyStats.get(date) || { meetings: 0, participants: 0 };
       dailyStats.set(date, {
         meetings: current.meetings + 1,
@@ -207,12 +208,12 @@ export class AnalyticsService {
     const meetings = await prisma.meeting.findMany({
       where: {
         organizationId,
-        scheduledStart: { gte: range.from, lte: range.to },
+        scheduledStartTime: { gte: range.from, lte: range.to },
         status: 'ENDED',
       },
       select: {
-        actualStart: true,
-        actualEnd: true,
+        actualStartTime: true,
+        actualEndTime: true,
       },
     });
 
@@ -221,9 +222,9 @@ export class AnalyticsService {
     const events: { time: Date; delta: number }[] = [];
 
     for (const meeting of meetings) {
-      if (meeting.actualStart && meeting.actualEnd) {
-        events.push({ time: meeting.actualStart, delta: 1 });
-        events.push({ time: meeting.actualEnd, delta: -1 });
+      if (meeting.actualStartTime && meeting.actualEndTime) {
+        events.push({ time: meeting.actualStartTime, delta: 1 });
+        events.push({ time: meeting.actualEndTime, delta: -1 });
       }
     }
 
@@ -261,8 +262,8 @@ export class AnalyticsService {
       throw new Error('Meeting not found');
     }
 
-    const duration = meeting.actualEnd && meeting.actualStart
-      ? Math.round((meeting.actualEnd.getTime() - meeting.actualStart.getTime()) / 60000)
+    const duration = meeting.actualEndTime && meeting.actualStartTime
+      ? Math.round((meeting.actualEndTime.getTime() - meeting.actualStartTime.getTime()) / 60000)
       : 0;
 
     const speakerStats = meeting.transcripts[0]?.speakers.map((s: any) => ({
@@ -310,7 +311,7 @@ export class AnalyticsService {
       where: {
         userId,
         meeting: {
-          scheduledStart: { gte: dateRange.from, lte: dateRange.to },
+          scheduledStartTime: { gte: dateRange.from, lte: dateRange.to },
         },
       },
       include: {
@@ -411,7 +412,7 @@ export class AnalyticsService {
     return prisma.meeting.findMany({
       where: {
         organizationId,
-        scheduledStart: { gte: range.from, lte: range.to },
+        scheduledStartTime: { gte: range.from, lte: range.to },
         status: 'ENDED',
       },
       include: {
@@ -433,7 +434,7 @@ export class AnalyticsService {
         participations: {
           where: {
             meeting: {
-              scheduledStart: { gte: range.from, lte: range.to },
+              scheduledStartTime: { gte: range.from, lte: range.to },
             },
           },
         },
@@ -461,7 +462,7 @@ export class AnalyticsService {
         participations: {
           where: {
             meeting: {
-              scheduledStart: { gte: range.from, lte: range.to },
+              scheduledStartTime: { gte: range.from, lte: range.to },
             },
           },
           include: { meeting: true },
@@ -486,12 +487,12 @@ export class AnalyticsService {
     const departments = await prisma.department.findMany({
       where: { organizationId },
       include: {
-        members: {
+        users: {
           include: {
             participations: {
               where: {
                 meeting: {
-                  scheduledStart: { gte: range.from, lte: range.to },
+                  scheduledStartTime: { gte: range.from, lte: range.to },
                 },
               },
             },
@@ -503,8 +504,8 @@ export class AnalyticsService {
     return departments.map((d: any) => ({
       id: d.id,
       name: d.name,
-      memberCount: d.members.length,
-      totalMeetings: d.members.reduce(
+      memberCount: d.users.length,
+      totalMeetings: d.users.reduce(
         (sum: number, m: any) => sum + m.participations.length,
         0
       ),

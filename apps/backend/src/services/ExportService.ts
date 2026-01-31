@@ -90,7 +90,6 @@ export class ExportService {
         actionItems: {
           include: { assignee: true },
         },
-        decisions: true,
       },
     });
 
@@ -99,12 +98,13 @@ export class ExportService {
     }
 
     // Merge config with organization branding
+    const orgBranding = (minutes.meeting.organization.brandingConfig as Record<string, unknown>) || {};
     const exportConfig: ExportConfig = {
       ...defaultConfig,
       ...configOverrides,
       branding: {
         ...defaultConfig.branding,
-        ...minutes.meeting.organization.branding,
+        ...orgBranding,
         ...configOverrides.branding,
       },
     };
@@ -120,15 +120,16 @@ export class ExportService {
     const url = await this.getPresignedUrl(fileName, 3600 * 24 * 7); // 7 days
 
     // Save export record
-    await prisma.documentExport.create({
+    await prisma.exportedDocument.create({
       data: {
-        type: 'MINUTES',
-        sourceId: minutesId,
+        minutesId: minutesId,
         format: 'PDF',
         fileName,
         fileSize: pdfBuffer.length,
+        fileUrl: url,
         checksum: this.calculateChecksum(pdfBuffer),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        createdById: (minutes as any).createdById || '',
       },
     });
 
@@ -630,15 +631,17 @@ export class ExportService {
 
     const url = await this.getPresignedUrl(fileName, 3600 * 24 * 7);
 
-    await prisma.documentExport.create({
+    // Get the meeting's hostId to use as createdById for the export
+    await prisma.exportedDocument.create({
       data: {
-        type: 'TRANSCRIPT',
-        sourceId: transcriptId,
+        minutesId: transcript.meetingId,
         format: 'PDF',
         fileName,
         fileSize: pdfBuffer.length,
+        fileUrl: url,
         checksum: this.calculateChecksum(pdfBuffer),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        createdById: (transcript.meeting as any)?.hostId || '',
       },
     });
 

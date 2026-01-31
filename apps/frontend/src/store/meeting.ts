@@ -66,6 +66,7 @@ interface MeetingState {
   startTime: Date | null;
   
   // Actions
+  initializeMedia: (options: { audio?: boolean; video?: boolean }) => Promise<MediaStream | null>;
   joinMeeting: (meetingId: string, token: string) => Promise<void>;
   leaveMeeting: () => Promise<void>;
   toggleMute: () => void;
@@ -109,6 +110,57 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   meetingTitle: '',
   hostId: null,
   startTime: null,
+
+  // Initialize media devices (camera/microphone)
+  initializeMedia: async (options: { audio?: boolean; video?: boolean }) => {
+    try {
+      console.log('[MeetingStore] Initializing media with options:', options);
+      
+      const constraints: MediaStreamConstraints = {
+        audio: options.audio !== false,
+        video: options.video !== false ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        } : false,
+      };
+
+      console.log('[MeetingStore] Requesting getUserMedia with constraints:', constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      console.log('[MeetingStore] Got stream:', stream);
+      console.log('[MeetingStore] Video tracks:', stream.getVideoTracks());
+      console.log('[MeetingStore] Audio tracks:', stream.getAudioTracks());
+      
+      set({ 
+        localStream: stream,
+        isMuted: !options.audio,
+        isVideoOff: !options.video,
+      });
+
+      console.log('[MeetingStore] State updated - isVideoOff:', !options.video);
+
+      return stream;
+    } catch (error) {
+      console.error('Failed to initialize media:', error);
+      // Try with fallback constraints
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          audio: options.audio !== false,
+          video: false,
+        });
+        set({ 
+          localStream: fallbackStream,
+          isMuted: !options.audio,
+          isVideoOff: true,
+        });
+        return fallbackStream;
+      } catch (fallbackError) {
+        console.error('Fallback media initialization failed:', fallbackError);
+        return null;
+      }
+    }
+  },
 
   // Actions
   joinMeeting: async (meetingId: string, token: string) => {
@@ -214,13 +266,44 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
     set({ isMuted: !isMuted });
   },
 
-  toggleVideo: () => {
+  toggleVideo: async () => {
     const { localStream, socket, isVideoOff } = get();
     
     if (localStream) {
-      localStream.getVideoTracks().forEach((track) => {
-        track.enabled = isVideoOff;
-      });
+      const videoTracks = localStream.getVideoTracks();
+      
+      if (isVideoOff) {
+        // Turn video ON
+        if (videoTracks.length > 0) {
+          // Re-enable existing track
+          videoTracks.forEach((track) => {
+            track.enabled = true;
+          });
+        } else {
+          // Need to get a new video track
+          try {
+            const newStream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 },
+              },
+            });
+            const newVideoTrack = newStream.getVideoTracks()[0];
+            if (newVideoTrack) {
+              localStream.addTrack(newVideoTrack);
+            }
+          } catch (error) {
+            console.error('Failed to get video track:', error);
+            return;
+          }
+        }
+      } else {
+        // Turn video OFF - just disable the track
+        videoTracks.forEach((track) => {
+          track.enabled = false;
+        });
+      }
     }
 
     socket?.emit('toggle-video', { enabled: isVideoOff });

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { nanoid } from 'nanoid';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { safePublish, cache } from '../lib/redis';
 import { config } from '../config';
@@ -104,7 +105,7 @@ export class MeetingService {
         translationEnabled,
         maxParticipants: Math.min(maxParticipants, org.maxParticipants),
         settings: settings || this.getDefaultSettings(),
-        agenda: agenda ? { items: agenda } : null,
+        agenda: agenda ? { items: agenda } : Prisma.JsonNull,
       },
       include: {
         host: {

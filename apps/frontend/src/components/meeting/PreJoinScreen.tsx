@@ -37,11 +37,14 @@ export function PreJoinScreen({
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [mediaReady, setMediaReady] = useState(false);
 
   const {
     devices,
     selectedDevices,
     stream,
+    error: deviceError,
     isLoading: devicesLoading,
     selectDevice,
     getMediaStream,
@@ -52,28 +55,74 @@ export function PreJoinScreen({
   const selectCamera = (deviceId: string) => selectDevice('videoInput', deviceId);
   const selectMicrophone = (deviceId: string) => selectDevice('audioInput', deviceId);
   const selectSpeaker = (deviceId: string) => selectDevice('audioOutput', deviceId);
-  const startStream = getMediaStream;
 
-  // Start video preview
+  // Start video preview on mount
   useEffect(() => {
-    if (videoEnabled) {
-      startStream({ video: true, audio: audioEnabled });
-    }
+    let isMounted = true;
+    
+    const initPreview = async () => {
+      try {
+        setMediaError(null);
+        const mediaStream = await getMediaStream({ video: true, audio: true });
+        if (isMounted) {
+          if (mediaStream) {
+            setMediaReady(true);
+          } else {
+            setMediaError('Could not access camera or microphone');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to start media preview:', err);
+        if (isMounted) {
+          setMediaError('Camera or microphone access denied. Please allow access and try again.');
+        }
+      }
+    };
+    
+    initPreview();
+    
+    // Cleanup on unmount
+    return () => {
+      isMounted = false;
+      stopStream();
+    };
   }, []);
 
   // Attach stream to video element
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      // Ensure video plays
+      videoRef.current.play().catch((err) => {
+        console.log('Preview video play failed:', err);
+      });
     }
   }, [stream]);
 
-  const handleToggleVideo = () => {
+  const handleToggleVideo = async () => {
     if (videoEnabled) {
-      stopStream();
+      // Turn off video - disable track
+      if (stream) {
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
       setVideoEnabled(false);
     } else {
-      startStream({ video: true, audio: audioEnabled });
+      // Turn on video - enable or get new stream
+      if (stream) {
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoTracks.forEach((track) => {
+            track.enabled = true;
+          });
+        } else {
+          // Get a fresh stream with video
+          await getMediaStream({ video: true, audio: audioEnabled });
+        }
+      } else {
+        await getMediaStream({ video: true, audio: audioEnabled });
+      }
       setVideoEnabled(true);
     }
   };
@@ -104,20 +153,47 @@ export function PreJoinScreen({
           {/* Video preview */}
           <div className="space-y-4">
             <div className="relative aspect-video bg-gray-800 rounded-2xl overflow-hidden">
-              {videoEnabled && stream ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover transform -scale-x-100"
-                />
-              ) : (
+              {/* Always render video element, just hide it when video is off */}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover transform -scale-x-100 ${!videoEnabled || !stream ? 'hidden' : ''}`}
+              />
+              {(!videoEnabled || !stream) && (
                 <div className="w-full h-full flex flex-col items-center justify-center">
-                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white mb-4">
-                    Y
-                  </div>
-                  <p className="text-gray-400">Camera is off</p>
+                  {mediaError || deviceError ? (
+                    <>
+                      <AlertCircle className="w-16 h-16 text-red-400 mb-4" />
+                      <p className="text-red-400 text-center px-4">{mediaError || deviceError}</p>
+                      <button
+                        onClick={() => window.location.reload()}
+                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                      >
+                        Try Again
+                      </button>
+                    </>
+                  ) : devicesLoading ? (
+                    <>
+                      <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                      <p className="text-gray-400">Setting up camera...</p>
+                    </>
+                  ) : stream && !videoEnabled ? (
+                    <>
+                      <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white mb-4">
+                        Y
+                      </div>
+                      <p className="text-gray-400">Camera is off</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white mb-4">
+                        Y
+                      </div>
+                      <p className="text-gray-400">Loading camera...</p>
+                    </>
+                  )}
                 </div>
               )}
 

@@ -7,15 +7,22 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { authApi, getTokens, clearTokens } from '@/lib/api';
+import { authApi, getTokens, clearTokens, ApiError } from '@/lib/api';
 
 interface User {
   id: string;
   email: string;
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
   name: string;
   avatar?: string;
+  avatarUrl?: string;
   role: string;
-  mfaEnabled: boolean;
+  mfaEnabled?: boolean;
+  organizationId?: string;
+  organizationName?: string;
+  createdAt?: string;
 }
 
 interface AuthContextType {
@@ -45,9 +52,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const userData = await authApi.getProfile();
-      setUser(userData);
-    } catch (error) {
-      console.error('Failed to refresh user:', error);
+      // Map API user to our User interface
+      const mappedUser: User = {
+        id: userData.id,
+        email: userData.email,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        displayName: userData.displayName,
+        name: userData.displayName || `${userData.firstName} ${userData.lastName}`.trim(),
+        avatar: userData.avatarUrl,
+        avatarUrl: userData.avatarUrl,
+        role: userData.role,
+        mfaEnabled: userData.mfaEnabled,
+        organizationId: userData.organizationId,
+        organizationName: userData.organizationName,
+      };
+      setUser(mappedUser);
+    } catch (error: unknown) {
+      // 401 is expected when not logged in - silently clear state
+      const isUnauthorized = error instanceof ApiError && error.status === 401;
+      
+      if (!isUnauthorized) {
+        console.error('Failed to refresh user:', error);
+      }
       setUser(null);
       clearTokens();
     }
@@ -70,7 +97,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { requiresMfa: true, mfaToken: result.mfaToken };
     }
 
-    setUser(result.user);
+    // Map API user to our User interface
+    const userData: User = {
+      id: result.user.id,
+      email: result.user.email,
+      firstName: result.user.firstName,
+      lastName: result.user.lastName,
+      displayName: result.user.displayName,
+      name: result.user.displayName || `${result.user.firstName} ${result.user.lastName}`.trim(),
+      avatar: result.user.avatarUrl,
+      avatarUrl: result.user.avatarUrl,
+      role: result.user.role,
+      mfaEnabled: result.user.mfaEnabled,
+      organizationId: result.user.organizationId,
+      organizationName: result.user.organizationName,
+    };
+    setUser(userData);
     return {};
   };
 

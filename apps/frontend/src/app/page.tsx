@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArrowRight, Video, FileText, Users, Shield, Mic, BarChart3 } from 'lucide-react';
 
 export default function HomePage() {
@@ -15,7 +16,7 @@ export default function HomePage() {
       <nav className="fixed top-8 z-50 w-full border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600" />
+            <Image src="/logo.png" alt="ChatVista" width={32} height={32} className="h-8 w-8 rounded-lg" />
             <span className="text-xl font-bold text-white">ChatVista</span>
           </div>
           <div className="hidden items-center gap-8 md:flex">
@@ -181,7 +182,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-4">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600" />
+              <Image src="/logo.png" alt="ChatVista" width={32} height={32} className="h-8 w-8 rounded-lg" />
               <span className="text-xl font-bold text-white">ChatVista</span>
             </div>
             <p className="text-gray-500">
